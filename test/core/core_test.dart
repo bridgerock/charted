@@ -21,18 +21,6 @@ part 'math_test.dart';
 part 'object_factory_test.dart';
 
 coreTests() {
-  test('toCallback() creates a callback to return the given value', () {
-    num value = 100;
-    ChartedCallback<num> cb = toCallback(value);
-    expect(cb(null, null, null), equals(value));
-  });
-
-  test('toValueAccessor() creates an accessor to return the given value', () {
-    num value = 100;
-    ChartedValueAccessor<num> cb = toValueAccessor(value);
-    expect(cb(null, null), equals(value));
-  });
-
   group('isNullOrEmpty()', () {
     test('returns true when the object is null or empty', () {
       expect(isNullOrEmpty(null), isTrue);

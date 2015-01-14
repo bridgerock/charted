@@ -1,5 +1,5 @@
 /*
- * Copyright 2014 Google Inc. All rights reserved.
+ * Copyright 2015 Google Inc. All rights reserved.
  *
  * Use of this source code is governed by a BSD-style
  * license that can be found in the LICENSE file or at
@@ -8,7 +8,7 @@
 
 part of charted.charts;
 
-class StackedBarChartRenderer extends BaseRenderer {
+class WaterfallChartRenderer extends BaseRenderer {
   final Iterable<int> dimensionsUsingBand = const[0];
 
   /*
@@ -18,7 +18,7 @@ class StackedBarChartRenderer extends BaseRenderer {
   @override
   bool prepare(ChartArea area, ChartSeries series) {
     _ensureAreaAndSeries(area, series);
-    return area.dimensionAxesCount != 0;
+    return area.dimensionAxesCount != 0 && area.data is WaterfallChartData;
   }
 
   @override
@@ -29,29 +29,54 @@ class StackedBarChartRenderer extends BaseRenderer {
     measureScale = area.measureScales(series).first,
     dimensionScale = area.dimensionScales.first;
 
-    var rows = new List()
+    // We support only one dimension, so always use the first one.
+    var x = area.data.rows.map(
+            (row) => row.elementAt(area.config.dimensions.first)).toList();
+
+    List<Iterable> rows = new List()
       ..addAll(area.data.rows.map((e) {
       var row = [];
-      for (var i = series.measures.length - 1; i >= 0; i--) {
+      for (var i = measuresCount - 1; i >= 0; i--) {
         row.add(e[series.measures.elementAt(i)]);
       }
       return row;
     }));
 
-    // We support only one dimension, so always use the first one.
-    var x = area.data.rows.map(
-            (row) => row.elementAt(area.config.dimensions.first)).toList();
+    // Pre-compute shift value on y-axis for non-base rows
+    var yShift = new List(),
+        runningTotal = 0;
+    for (int i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (_isBaseRow(i)) {
+        runningTotal = 0;
+      }
+      yShift.add(runningTotal);
+      var bar = 0;
+      row.forEach((value) => bar += value);
+      runningTotal += bar;
+
+      // Handle Nagative incremental values:
+      if (row.elementAt(0) < 0) {
+        assert(row.every((value) => value <= 0));
+        for (int j = 0; j < row.length; j++) {
+          row[j] = 0 - row[j];
+        }
+        yShift[yShift.length - 1] += bar;
+      }
+    }
 
     var group = root.selectAll('.row-group').data(rows);
     group.enter.append('g')
       ..classed('row-group')
       ..attrWithCallback('transform', (d, i, c) =>
-    'translate(${dimensionScale.apply(x[i])}, 0)');
+          'translate(${dimensionScale.apply(x[i])},'
+          '${measureScale.apply(yShift[i]).round() - rect.height})');
     group.exit.remove();
 
     group.transition()
       ..attrWithCallback('transform', (d, i, c) =>
-    'translate(${dimensionScale.apply(x[i])}, 0)')
+          'translate(${dimensionScale.apply(x[i])},'
+          '${measureScale.apply(yShift[i]).round() - rect.height})')
       ..duration(theme.transitionDuration)
       ..attrWithCallback('data-row', (d, i, e) => i);
 
@@ -60,9 +85,8 @@ class StackedBarChartRenderer extends BaseRenderer {
 
     var ic = -1,
     order = 0,
-    prevY = new List();
+    prevY = new List()..add(0);
 
-    prevY.add(0);
     bar.each((d, i, e) {
       if (i > ic) {
         prevY[prevY.length - 1] = e.attributes['y'];
@@ -160,19 +184,20 @@ class StackedBarChartRenderer extends BaseRenderer {
     assert(area != null && series != null);
     var rows = area.data.rows,
     max = rows[0][series.measures.first],
-    min = max;
+    min = max,
+    runningTotal = 0;
 
-    rows.forEach((row) {
-      if (row[series.measures.first] < min)
-        min = row[series.measures.first];
-
-      var bar = 0;
+    for (int i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (_isBaseRow(i)) {
+        runningTotal = 0;
+      }
       series.measures.forEach((idx) {
-        bar += row[idx];
+        runningTotal += row[idx];
       });
-      if (bar > max) max = bar;
-    });
-
+      if (runningTotal > max) max = runningTotal;
+      if (runningTotal < min) min = runningTotal;
+    }
     return new Extent(min, max);
   }
 
@@ -187,4 +212,8 @@ class StackedBarChartRenderer extends BaseRenderer {
   // Because waterfall bar chart render the measures in reverse order to match
   // the legend, we need to reverse the index for color and event.
   int _reverseIdx(int index) => series.measures.length - 1 - index;
+
+  bool _isBaseRow(int index) =>
+      area.data is WaterfallChartData ?
+          (area.data as WaterfallChartData).baseRows.contains(index) : false;
 }
